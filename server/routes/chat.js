@@ -6,11 +6,11 @@ import { proposeChange } from "../tools/proposeChange.js";
 import { writeFile } from "../tools/writeFile.js";
 import { generateDiff } from "../tools/generateDiff.js";
 import { getProjectTree } from "../tools/getProjectTree.js";
-import { readFile } from "../tools/readFile.js";
 import { listFiles } from "../tools/listFiles.js";
 import { searchFiles } from "../tools/searchFiles.js";
 import { getRepositoryRoot } from "../tools/repositoryRoot.js";
 import { readFileRange } from "../tools/readFileRange.js";
+import { analyzeRepository } from "../tools/analyzeRepository.js";
 
 dotenv.config();
 
@@ -25,13 +25,26 @@ Tool strategy:
 1. Already know the file? Read it directly with readFileRange, not the whole file.
 2. Otherwise call searchFiles ONCE with a focused query. It returns files ranked by relevance, each with the best-matching lines, inline snippets, and enclosing function/route name — this is usually enough to answer without any further tool call.
 3. Only call readFileRange afterward if the snippet genuinely isn't enough context. Request a narrow line range around the match, never the whole file.
-4. Use getProjectTree only when the question is actually about repo structure.
+4. 4. For architecture, dependency, entry-point, module-relationship, or "how is this repository structured?" questions, use analyzeRepository first. Do not manually explore the repository with getProjectTree, searchFiles, and multiple reads unless analyzeRepository is insufficient.
 5. Don't repeat searches with synonyms if the first result already answered it. Don't search generic terms ("api", "code", "data") unless the question needs them.
 6. Stop calling tools the moment you have enough evidence. Normal questions should take 1-3 calls, 4 at most.
 
 If evidence is still insufficient after one targeted extra call, answer with what you found and say what's missing — don't invent the rest.`;
 
 const tools = [
+    {
+        type: "function",
+        function: {
+            name: "analyzeRepository",
+            description:
+                "Analyze the repository architecture using its AST and dependency indexes. Returns a compact summary of entry points, their dependencies, important symbols, exports, and highly shared modules. Use this first for architecture, dependency, module relationship, or repository structure questions.",
+            parameters: {
+                type: "object",
+                properties: {},
+                additionalProperties: false,
+            },
+        },
+    },
     {
         type: "function",
         function: {
@@ -51,23 +64,6 @@ const tools = [
             name: "getProjectTree",
             description: "Get the uploaded repository's file and folder structure when structure is needed.",
             parameters: { type: "object", properties: {}, additionalProperties: false },
-        },
-    },
-    {
-        type: "function",
-        function: {
-            name: "readFile",
-            description: "Read a focused portion of a file in the uploaded repository.",
-            parameters: {
-                type: "object",
-                properties: {
-                    path: { type: "string" },
-                    startLine: { type: "integer" },
-                    endLine: { type: "integer" },
-                },
-                required: ["path"],
-                additionalProperties: false,
-            },
         },
     },
     {
@@ -95,35 +91,35 @@ const tools = [
         },
     },
     {
-    type: "function",
-    function: {
-        name: "readFileRange",
-        description:
-            "Reads a specific range of lines from a file. Use this after searchFiles finds a relevant line so that only the necessary code is inspected.",
-        parameters: {
-            type: "object",
-            properties: {
-                path: {
-                    type: "string",
-                    description: "Relative path of the file.",
+        type: "function",
+        function: {
+            name: "readFileRange",
+            description:
+                "Reads a specific range of lines from a file. Use this after searchFiles finds a relevant line so that only the necessary code is inspected.",
+            parameters: {
+                type: "object",
+                properties: {
+                    path: {
+                        type: "string",
+                        description: "Relative path of the file.",
+                    },
+                    startLine: {
+                        type: "integer",
+                        description: "First line to read.",
+                    },
+                    endLine: {
+                        type: "integer",
+                        description: "Last line to read.",
+                    },
                 },
-                startLine: {
-                    type: "integer",
-                    description: "First line to read.",
-                },
-                endLine: {
-                    type: "integer",
-                    description: "Last line to read.",
-                },
+                required: [
+                    "path",
+                    "startLine",
+                    "endLine",
+                ],
+                additionalProperties: false,
             },
-            required: [
-                "path",
-                "startLine",
-                "endLine",
-            ],
-            additionalProperties: false,
         },
-    },
 
     }
 
@@ -166,6 +162,7 @@ async function runAgent(message, repositoryId) {
     ];
 
     let proposal = null;
+    let analyzeRepositoryUsed = false;
     const MAX_STEPS = 8;
     const toolMessageIndicesByStep = [];
 
@@ -212,12 +209,20 @@ async function runAgent(message, repositoryId) {
 
             try {
                 let result;
-
-                if (toolName === "searchFiles") result = await searchFiles(repositoryId, args.query);
-                else if (toolName === "readFile") result = await readFile(repositoryId, args.path, args.startLine, args.endLine);
+                if (toolName === "analyzeRepository") {
+                    if (analyzeRepositoryUsed) {
+                        result = {
+                            error: "analyzeRepository can only be called once per user request. Use the existing analysis and inspect specific files if more evidence is needed."
+                        };
+                    } else {
+                        analyzeRepositoryUsed = true;
+                        result = await analyzeRepository(repositoryId);
+                    }
+                }
+                else if (toolName === "searchFiles") result = await searchFiles(repositoryId, args.query);
                 else if (toolName === "getProjectTree") result = await getProjectTree(repositoryId);
                 else if (toolName === "listFiles") result = await listFiles(repositoryId, ".");
-                else if (toolName === "readFileRange") result = await readFileRange(repositoryId,args.path,args.startLine,args.endLine);
+                else if (toolName === "readFileRange") result = await readFileRange(repositoryId, args.path, args.startLine, args.endLine);
                 else if (toolName === "proposeChange") result = await proposeChange(repositoryId, args.path, args.newContent);
                 else throw new Error(`Unknown tool: ${toolName}`);
 
