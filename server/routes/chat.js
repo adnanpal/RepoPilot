@@ -17,7 +17,7 @@ dotenv.config();
 const router = express.Router();
 const pendingChanges = new Map();
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
-const MODEL = "qwen/qwen3.6-27b";
+const MODEL = "qwen/qwen3.8-27b";
 
 const systemInstruction = `You are RepoPilot, an AI repository engineer. Use the MINIMUM repository info needed to answer. Never claim a file, function, route, or behavior exists unless a tool result showed it — say "not found" instead of guessing.
 
