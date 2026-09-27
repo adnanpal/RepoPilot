@@ -355,7 +355,7 @@ export default function App() {
         <div className="mx-auto flex h-full max-w-3xl items-center justify-between px-4 sm:px-6">
           <div className="flex items-center gap-2">
             <CursorMark size={17} />
-            <span className="text-[15px] font-semibold tracking-tight">RepoForgeByAdnan</span>
+            <span className="text-[15px] font-semibold tracking-tight">RepoForge</span>
           </div>
 
           <div className="flex items-center gap-2">
